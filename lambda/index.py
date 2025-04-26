@@ -1,91 +1,28 @@
-import json
-import os
-import re
-import requests
+import json, os, urllib.request
 
-# Lambda コンテキストからリージョンを抽出する関数
-def extract_region_from_arn(arn):
-    match = re.search('arn:aws:lambda:([^:]+):', arn)
-    if match:
-        return match.group(1)
-    return "us-east-1"
+PREDICT_URL = os.environ.get("PREDICT_URL")  # Lambda の環境変数に設定
 
-# FastAPIサーバーのエンドポイントURL
-FASTAPI_URL = "https://daa2-34-139-107-253.ngrok-free.app/predict" 
+def call_custom_api(msg: str):
+    req_body = json.dumps({"text": msg}).encode("utf-8")
+    req = urllib.request.Request(
+        url=PREDICT_URL,
+        data=req_body,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=30) as res:
+        res_body = res.read()
+        return json.loads(res_body)["answer"]
 
 def lambda_handler(event, context):
-    try:
-        print("Received event:", json.dumps(event))
-        
-        # リクエストボディの解析
-        body = json.loads(event['body'])
-        message = body['message']
-        conversation_history = body.get('conversationHistory', [])
-        
-        print("Processing message:", message)
-        
-        # 会話履歴を使ってまとめたプロンプトを作る
-        messages = conversation_history.copy()
-        messages.append({
-            "role": "user",
-            "content": message
-        })
+    body = json.loads(event["body"])
+    user_msg = body["message"]
+    assistant = call_custom_api(user_msg)
 
-        # FastAPIサーバーに送るテキストを作成
-        merged_prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
-
-        # FastAPI推論APIにPOSTリクエストを送る
-        response = requests.post(
-            FASTAPI_URL,
-            json={"text": merged_prompt}
-        )
-
-        if response.status_code == 200:
-            result = response.json()
-            assistant_response = result.get("answer", "No answer returned.")
-
-            # 応答を会話履歴に追加
-            messages.append({
-                "role": "assistant",
-                "content": assistant_response
-            })
-
-            return {
-                "statusCode": 200,
-                "headers": {
-                    "Content-Type": "application/json",
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
-                    "Access-Control-Allow-Methods": "OPTIONS,POST"
-                },
-                "body": json.dumps({
-                    "success": True,
-                    "response": assistant_response,
-                    "conversationHistory": messages
-                })
-            }
-        else:
-            return {
-                "statusCode": response.status_code,
-                "body": json.dumps({
-                    "success": False,
-                    "error": "Failed to get prediction"
-                })
-            }
-        
-    except Exception as error:
-        print("Error:", str(error))
-        return {
-            "statusCode": 500,
-            "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
-                "Access-Control-Allow-Methods": "OPTIONS,POST"
-            },
-            "body": json.dumps({
-                "success": False,
-                "error": str(error)
-            })
-        }
-
+    return {
+        "statusCode": 200,
+        "headers": { "Content-Type": "application/json",
+                     "Access-Control-Allow-Origin": "*"},
+        "body": json.dumps({"success": True,
+                            "response": assistant})
+    }
