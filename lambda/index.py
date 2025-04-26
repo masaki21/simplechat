@@ -3,7 +3,7 @@ import os
 import re
 import requests
 
-# Lambda コンテキストからリージョンを抽出する関数（今回は不要だけど、残してOK）
+# Lambda コンテキストからリージョンを抽出する関数
 def extract_region_from_arn(arn):
     match = re.search('arn:aws:lambda:([^:]+):', arn)
     if match:
@@ -11,7 +11,7 @@ def extract_region_from_arn(arn):
     return "us-east-1"
 
 # FastAPIサーバーのエンドポイントURL
-FASTAPI_URL = "https://あなたのngrokのURL.ngrok-free.app/predict"  # 自分の最新URLをここに！
+FASTAPI_URL = "https://daa2-34-139-107-253.ngrok-free.app/predict" 
 
 def lambda_handler(event, context):
     try:
