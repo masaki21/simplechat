@@ -4,7 +4,7 @@ import * as cdk from 'aws-cdk-lib';
 import { BedrockChatbotStack, BedrockChatbotStackProps } from '../lib/bedrock-chatbot-stack';
 
 // ======== ★ ここだけ書き換える値 ★ =========================
-const PREDICT_URL = 'https://67ad-34-106-21-190.ngrok-free.app/predict'; // ← Colab/ngrok URL
+const PREDICT_URL = 'https://215d-34-106-21-190.ngrok-free.app/predict'; // ← Colab/ngrok URL
 const MODEL_ID    = 'us.amazon.nova-lite-v1:0';                          // ← Bedrock fallback
 // ===========================================================
 
