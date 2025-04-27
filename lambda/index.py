@@ -72,11 +72,14 @@ def call_external_api(prompt: str) -> str:
 # ---------- Lambda ハンドラ ---------- #
 def lambda_handler(event, context):
     try:
+        print("★ PREDICT_URL:", repr(PREDICT_URL))
+        
         body    = json.loads(event.get("body", "{}"))
         prompt  = body["message"]
         history = body.get("conversationHistory", [])
 
-        if PREDICT_URL:                 # 外部 API 優先
+        if PREDICT_URL:　　# 外部 API 優先
+            print(f"→ 外部API呼び出し: {PREDICT_URL}")
             reply = call_external_api(prompt)
         else:                           # Bedrock を使用
             reply = call_bedrock(prompt, history, context)
