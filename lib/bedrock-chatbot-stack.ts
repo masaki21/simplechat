@@ -158,6 +158,7 @@ export class BedrockChatbotStack extends cdk.Stack {
       role: lambdaRole,
       environment: {
         MODEL_ID: modelId,
+        API_URL: 'https://f520-34-106-21-190.ngrok-free.app/predict',
       },
     });
 
