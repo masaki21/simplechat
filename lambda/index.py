@@ -2,20 +2,17 @@ import json
 import os
 import re
 import urllib.request
-import urllib.error
 import boto3
-from botocore.exceptions import ClientError
 
-# ========================== ① 共通ユーティリティ ========================== #
+# ---------- 共通ヘルパ ---------- #
 def extract_region_from_arn(arn: str) -> str:
-    """Lambda ARN からリージョンを取得（例: arn:aws:lambda:us-east-1:...）"""
+    """Lambda ARN からリージョン部分だけ抜き出す"""
     m = re.search(r"arn:aws:lambda:([^:]+):", arn)
     return m.group(1) if m else "us-east-1"
 
-def build_response(status: int, body: dict) -> dict:
-    """CORS 付き API Gateway レスポンス"""
+def build_resp(code: int, body: dict) -> dict:
     return {
-        "statusCode": status,
+        "statusCode": code,
         "headers": {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
@@ -25,33 +22,23 @@ def build_response(status: int, body: dict) -> dict:
         "body": json.dumps(body)
     }
 
-# ========================== ② Bedrock 設定 & 呼び出し ====================== #
+# ---------- Bedrock 呼び出し ---------- #
 MODEL_ID = os.environ.get("MODEL_ID", "us.amazon.nova-lite-v1:0")
-_bedrock_client = None
+_bedrock = None
 
-def call_bedrock(prompt: str, history=None) -> str:
-    """Bedrock (Nova Lite など) を呼び出す"""
-    global _bedrock_client
-    if _bedrock_client is None:
-        # コンテキスト内リージョンを動的取得
-        _bedrock_client = boto3.client("bedrock-runtime",
-                                       region_name=extract_region_from_arn(
-                                           os.environ["AWS_LAMBDA_FUNCTION_ARN"]
-                                       ))
+def call_bedrock(prompt: str, history, context) -> str:
+    global _bedrock
+    if _bedrock is None:
+        region = extract_region_from_arn(context.invoked_function_arn)   # ★ ここを修正
+        _bedrock = boto3.client("bedrock-runtime", region_name=region)
 
-    messages = history or []
-    messages.append({"role": "user", "content": prompt})
-
-    # Bedrock のメッセージ形式に変換
-    bedrock_messages = [
-        {
-            "role": m["role"],
-            "content": [{"text": m["content"]}]
-        } for m in messages
+    msgs = history + [{"role": "user", "content": prompt}]
+    bedrock_msgs = [
+        {"role": m["role"], "content": [{"text": m["content"]}]}
+        for m in msgs
     ]
-
     payload = {
-        "messages": bedrock_messages,
+        "messages": bedrock_msgs,
         "inferenceConfig": {
             "maxTokens": 512,
             "temperature": 0.7,
@@ -59,8 +46,7 @@ def call_bedrock(prompt: str, history=None) -> str:
             "stopSequences": []
         }
     }
-
-    res = _bedrock_client.invoke_model(
+    res = _bedrock.invoke_model(
         modelId=MODEL_ID,
         body=json.dumps(payload),
         contentType="application/json"
@@ -68,47 +54,37 @@ def call_bedrock(prompt: str, history=None) -> str:
     body = json.loads(res["body"].read())
     return body["output"]["message"]["content"][0]["text"]
 
-# ========================== ③ 外部モデル API 呼び出し ======================= #
-PREDICT_URL = os.environ.get("https://68f9-34-106-21-190.ngrok-free.app/predict")   # 例: https://xxxx.ngrok-free.app/predict
+# ---------- 外部モデル API 呼び出し（任意） ---------- #
+PREDICT_URL = os.environ.get("https://8753-34-106-21-190.ngrok-free.app/predict")
 
 def call_external_api(prompt: str) -> str:
-    """FastAPI などで公開した任意モデルを呼ぶ"""
     if not PREDICT_URL:
         raise RuntimeError("PREDICT_URL not set")
-
-    req_body = json.dumps({"text": prompt}).encode("utf-8")
+    data = json.dumps({"text": prompt}).encode()
     req = urllib.request.Request(
-        PREDICT_URL,
-        data=req_body,
+        PREDICT_URL, data=data,
         headers={"Content-Type": "application/json"},
         method="POST"
     )
-    with urllib.request.urlopen(req, timeout=30) as res:
-        data = json.loads(res.read())
-        # 期待するキー名に合わせて取り出す
-        return data["answer"]
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read())["answer"]
 
-# ========================== ④ Lambda ハンドラ ============================= #
+# ---------- Lambda ハンドラ ---------- #
 def lambda_handler(event, context):
     try:
-        body = json.loads(event.get("body", "{}"))
-        user_msg = body["message"]
-        history  = body.get("conversationHistory", [])
+        body    = json.loads(event.get("body", "{}"))
+        prompt  = body["message"]
+        history = body.get("conversationHistory", [])
 
-        # ★ 外部 API が設定されていればそちらを優先
-        if PREDICT_URL:
-            assistant_reply = call_external_api(user_msg)
-        else:
-            assistant_reply = call_bedrock(user_msg, history)
+        if PREDICT_URL:                 # 外部 API 優先
+            reply = call_external_api(prompt)
+        else:                           # Bedrock を使用
+            reply = call_bedrock(prompt, history, context)
 
-        history.append({"role": "assistant", "content": assistant_reply})
-        return build_response(200, {
-            "success": True,
-            "response": assistant_reply,
-            "conversationHistory": history
-        })
-
+        history.append({"role": "assistant", "content": reply})
+        return build_resp(200, {"success": True,
+                                "response": reply,
+                                "conversationHistory": history})
     except Exception as e:
-        # CloudWatch Logs でトレースしやすいようにスタックも出力
         print("❌ Error:", repr(e))
-        return build_response(500, {"success": False, "error": str(e)})
+        return build_resp(500, {"success": False, "error": str(e)})
