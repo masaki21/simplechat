@@ -4,7 +4,7 @@ import * as cdk from 'aws-cdk-lib';
 import { BedrockChatbotStack } from '../lib/bedrock-chatbot-stack';
 
 const app = new cdk.App();
-const externalApiUrl = 'https://f520-34-106-21-190.ngrok-free.app/predict';
+const externalApiUrl = 'https://9cf9-35-190-179-170.ngrok-free.app/predict';
 new BedrockChatbotStack(app, 'BedrockChatbotStack', {
   // モデルIDをオプションで指定可能
   modelId: 'us.amazon.nova-lite-v1:0',
