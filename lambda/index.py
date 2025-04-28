@@ -8,7 +8,7 @@ import re
 # ──────────────────────────────────────────────
 # 1. 定数とユーティリティ
 # ──────────────────────────────────────────────
-API_URL = os.environ.get("API_URL", "")      # CDK で渡した URL
+PREDICT_URL = os.environ.get("PREDICT_URL", "")      # CDK で渡した URL
 TIMEOUT  = 10                                # 秒
 
 def extract_region_from_arn(arn: str) -> str:
@@ -18,12 +18,12 @@ def extract_region_from_arn(arn: str) -> str:
 
 def call_external_model(prompt: str) -> str:
     """Colab FastAPI へ JSON POST して応答文字列を返す"""
-    if not API_URL:
-        raise RuntimeError("API_URL environment variable is not set")
+    if not PREDICT_URL:
+        raise RuntimeError("PREDICT_URL environment variable is not set")
 
     payload = json.dumps({"text": prompt}).encode("utf-8")
     req = urllib.request.Request(
-        API_URL,
+        PREDICT_URL,
         data=payload,
         headers={"Content-Type": "application/json"},
         method="POST"
