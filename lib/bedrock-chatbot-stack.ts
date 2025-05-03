@@ -15,7 +15,6 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 
 export interface BedrockChatbotStackProps extends cdk.StackProps {
   modelId?: string;
-  apiUrl?: string;
 }
 
 export class BedrockChatbotStack extends cdk.Stack {
@@ -23,7 +22,6 @@ export class BedrockChatbotStack extends cdk.Stack {
     super(scope, id, props);
 
     const modelId = props?.modelId || 'us.amazon.nova-lite-v1:0';
-    const apiUrl  = props?.apiUrl   || '';
 
     // Cognito User Poolの作成
     const userPool = new cognito.UserPool(this, 'ChatbotUserPool', {
@@ -160,7 +158,6 @@ export class BedrockChatbotStack extends cdk.Stack {
       role: lambdaRole,
       environment: {
         MODEL_ID: modelId,
-        PREDICT_URL: 'https://9fc8-34-125-85-61.ngrok-free.app/predict',
       },
     });
 
