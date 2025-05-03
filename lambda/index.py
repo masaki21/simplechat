@@ -1,96 +1,122 @@
-# lambda/index.py
-import json
 import os
-import urllib.request
-import urllib.error
-import re
+import json
+import time
+import traceback
+from typing import List, Dict, Optional
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from transformers import pipeline
+import torch
+import nest_asyncio
+from pyngrok import ngrok
+import uvicorn
 
-# ──────────────────────────────────────────────
-# 1. 定数とユーティリティ
-# ──────────────────────────────────────────────
-PREDICT_URL = os.environ.get("PREDICT_URL", "")      # CDK で渡した URL
-TIMEOUT  = 10                                # 秒
+# --- 設定 ---
+MODEL_NAME = os.environ.get("MODEL_NAME", "google/gemma-2-2b-jpn-it")
+print(f"使用モデル: {MODEL_NAME}")
+model = None
 
-def extract_region_from_arn(arn: str) -> str:
-    """今回リージョンは使わないが、既存実装を残しておく"""
-    m = re.search(r'arn:aws:lambda:([^:]+):', arn)
-    return m.group(1) if m else "us-east-1"
+# --- FastAPIアプリ作成 ---
+app = FastAPI(title="FastAPI LLM API", description="Hugging Face TransformersベースのチャットAPI", version="1.0")
 
-def call_external_model(prompt: str) -> str:
-    """Colab FastAPI へ JSON POST して応答文字列を返す"""
-    if not PREDICT_URL:
-        raise RuntimeError("PREDICT_URL environment variable is not set")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    payload = json.dumps({"text": prompt}).encode("utf-8")
-    req = urllib.request.Request(
-        PREDICT_URL,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST"
+# --- データ構造定義 ---
+class Message(BaseModel):
+    role: str
+    content: str
+
+class RequestBody(BaseModel):
+    message: str
+    conversationHistory: Optional[List[Message]] = []
+
+class ResponseBody(BaseModel):
+    success: bool
+    response: str
+    conversationHistory: List[Message]
+
+# --- モデル読み込み ---
+def load_model():
+    global model
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"使用デバイス: {device}")
+    model = pipeline(
+        "text-generation",
+        model=MODEL_NAME,
+        model_kwargs={"torch_dtype": torch.bfloat16},
+        device=device
     )
+    print("モデル読み込み完了")
 
+# --- アシスタント応答抽出関数 ---
+def extract_response(outputs, prompt):
+    if outputs and isinstance(outputs, list):
+        text = outputs[0]["generated_text"]
+        if prompt in text:
+            return text.split(prompt)[-1].strip()
+        else:
+            return text.strip()
+    return "応答を生成できませんでした。"
+
+# --- APIエンドポイント ---
+@app.post("/chat", response_model=ResponseBody)
+async def chat(request: RequestBody):
+    global model
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            body = resp.read().decode("utf-8")
-            data = json.loads(body)
-            # FastAPI が {"answer": "..."} を返す想定
-            return data.get("answer") or str(data)
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"External API HTTP {e.code}: {e.read().decode()}")
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"External API URL Error: {e.reason}")
+        if model is None:
+            load_model()
 
-# ──────────────────────────────────────────────
-# 2. Lambda メインハンドラ
-# ──────────────────────────────────────────────
-def lambda_handler(event, context):
-    try:
-        print("Received event:", json.dumps(event))
+        messages = request.conversationHistory or []
+        messages.append({"role": "user", "content": request.message})
 
-        # --- リクエストを取り出す ---
-        body = json.loads(event["body"])
-        message = body["message"]
-        conversation_history = body.get("conversationHistory", [])
+        # 単純に直列に連結
+        prompt = ""
+        for msg in messages:
+            prompt += f"{msg['role']}: {msg['content']}\n"
+        prompt += "assistant: "
 
-        # --- Colab FastAPI へ投げる ---
-        print("Sending to external model:", message)
-        assistant_response = call_external_model(message)
-        print("Assistant response:", assistant_response)
+        print("生成プロンプト:", prompt)
 
-        # --- 会話履歴を更新 ---
-        messages = conversation_history + [
-            {"role": "user", "content": message},
-            {"role": "assistant", "content": assistant_response}
-        ]
+        outputs = model(prompt, max_new_tokens=512, do_sample=True, temperature=0.7, top_p=0.9)
+        assistant_reply = extract_response(outputs, prompt)
 
-        # --- 正常レスポンス ---
+        messages.append({"role": "assistant", "content": assistant_reply})
+
         return {
-            "statusCode": 200,
-            "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
-                "Access-Control-Allow-Methods": "OPTIONS,POST"
-            },
-            "body": json.dumps({
-                "success": True,
-                "response": assistant_response,
-                "conversationHistory": messages
-            })
+            "success": True,
+            "response": assistant_reply,
+            "conversationHistory": messages
         }
 
-    except Exception as err:
-        print("Error:", str(err))
-        return {
-            "statusCode": 500,
-            "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
-                "Access-Control-Allow-Methods": "OPTIONS,POST"
-            },
-            "body": json.dumps({
-                "success": False,
-                "error": str(err)
-            })
-        }
+    except Exception as e:
+        print("エラー:", str(e))
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="モデルによる応答生成に失敗しました")
+
+# --- 起動時にモデルをロード ---
+@app.on_event("startup")
+def on_startup():
+    load_model()
+
+# --- ngrokトンネル起動 ---
+def run_with_ngrok(port=8000):
+    nest_asyncio.apply()
+    ngrok_token = os.environ.get("NGROK_TOKEN")
+    if not ngrok_token:
+        print("⚠️ NGROK_TOKEN を環境変数に設定してください")
+        return
+    ngrok.set_auth_token(ngrok_token)
+    public_url = ngrok.connect(port).public_url
+    print("🚀 公開URL:", public_url)
+    print("📘 ドキュメント:", public_url + "/docs")
+    uvicorn.run(app, host="0.0.0.0", port=port)
+
+# --- 実行ブロック ---
+if __name__ == "__main__":
+    run_with_ngrok(port=8000)
