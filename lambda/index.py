@@ -80,6 +80,9 @@ def extract_response(outputs, prompt):
     return "応答を生成できませんでした。"
 
 # --- APIエンドポイント ---
+@app.get("/")
+async def root():
+    return {"message": "FastAPI LLM API is running!"}
 @app.post("/chat", response_model=ResponseBody)
 async def chat(request: RequestBody):
     global model
