@@ -21,11 +21,11 @@ from dotenv import load_dotenv  # ← 追加
 load_dotenv()
 
 # --- トークン認証（Hugging Face） ---
-hf_token = os.getenv("HUGGINGFACE_HUB_TOKEN")
+hf_token = os.getenv("HUGGINGFACE_TOKEN")
 if hf_token:
     login(hf_token)
 else:
-    print("⚠️ HUGGINGFACE_HUB_TOKEN が .env に設定されていません")
+    print("⚠️ HUGGINGFACE_TOKEN が .env に設定されていません")
 
 # --- 設定 ---
 MODEL_NAME = os.getenv("MODEL_NAME", "distilgpt2")
