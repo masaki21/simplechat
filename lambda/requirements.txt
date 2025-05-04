@@ -1,2 +1,9 @@
-boto3==1.28.0
-botocore==1.31.0
+fastapi
+uvicorn
+transformers
+torch
+python-dotenv
+pyngrok
+huggingface_hub
+nest-asyncio
+pydantic
