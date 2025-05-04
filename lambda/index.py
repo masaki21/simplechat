@@ -3,17 +3,32 @@ import json
 import time
 import traceback
 from typing import List, Dict, Optional
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
 from transformers import pipeline
+from huggingface_hub import login  # トークン認証用
+
 import torch
 import nest_asyncio
 from pyngrok import ngrok
 import uvicorn
+from dotenv import load_dotenv  # ← 追加
+
+# --- .envファイルの読み込み ---
+load_dotenv()
+
+# --- トークン認証（Hugging Face） ---
+hf_token = os.getenv("HUGGINGFACE_HUB_TOKEN")
+if hf_token:
+    login(hf_token)
+else:
+    print("⚠️ HUGGINGFACE_HUB_TOKEN が .env に設定されていません")
 
 # --- 設定 ---
-MODEL_NAME = os.environ.get("MODEL_NAME", "google/gemma-2-2b-jpn-it")
+MODEL_NAME = os.getenv("MODEL_NAME", "distilgpt2")
 print(f"使用モデル: {MODEL_NAME}")
 model = None
 
@@ -49,7 +64,7 @@ def load_model():
     model = pipeline(
         "text-generation",
         model=MODEL_NAME,
-        model_kwargs={"torch_dtype": torch.bfloat16},
+        model_kwargs={"torch_dtype": torch.bfloat16} if device == "cuda" else {},
         device=device
     )
     print("モデル読み込み完了")
@@ -65,10 +80,6 @@ def extract_response(outputs, prompt):
     return "応答を生成できませんでした。"
 
 # --- APIエンドポイント ---
-@app.get("/")
-async def root():
-    return {"message": "FastAPI LLM API is running!"}
-
 @app.post("/chat", response_model=ResponseBody)
 async def chat(request: RequestBody):
     global model
@@ -79,7 +90,6 @@ async def chat(request: RequestBody):
         messages = request.conversationHistory or []
         messages.append({"role": "user", "content": request.message})
 
-        # 単純に直列に連結
         prompt = ""
         for msg in messages:
             prompt += f"{msg['role']}: {msg['content']}\n"
@@ -111,9 +121,9 @@ def on_startup():
 # --- ngrokトンネル起動 ---
 def run_with_ngrok(port=8000):
     nest_asyncio.apply()
-    ngrok_token = os.environ.get("NGROK_TOKEN")
+    ngrok_token = os.getenv("NGROK_TOKEN")
     if not ngrok_token:
-        print("⚠️ NGROK_TOKEN を環境変数に設定してください")
+        print("⚠️ NGROK_TOKEN が .env に設定されていません")
         return
     ngrok.set_auth_token(ngrok_token)
     public_url = ngrok.connect(port).public_url
